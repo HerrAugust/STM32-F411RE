@@ -1,4 +1,11 @@
 /* USER CODE BEGIN Header */
+
+
+// This program contains:
+// 1. A part about counting 1,2,3...seconds with timers (Am I interrupted when I need?)
+// 2. A part about (clock()-clock())/1000 (How much has the function lasted?)
+
+
 /**
   ******************************************************************************
   * @file           : main.c
@@ -54,7 +61,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define EXE_WAIT 0 /* run func1 or 2? */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,6 +83,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
+
+static void func1();
+static void func2();
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -122,6 +132,30 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   HAL_TIM_Base_Start(&htim1);
+  if (EXE_WAIT)
+    func1();
+  else
+    func2();
+  /* USER CODE END 3 */
+}
+
+/**
+  * Test (clock() - clock()) / CLOCK_PER_SEC
+  */
+void func1() {
+  sprintf(buffer, "while - Begin\r\n");
+  HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+
+  while (1)
+  {
+    // see TIM1 callback
+  }
+}
+
+/**
+  * Test delay with timer (polling)
+  */
+void func2() {
   while (1)
   {
     /* USER CODE END WHILE */
@@ -129,24 +163,21 @@ int main(void)
     HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
 
 
-    // how much does Transmit + sprintf last?
+    // Am I really measuring microseconds?
     int prevReading = __HAL_TIM_GetCounter(&htim1);
 
-    sprintf(buffer, "...core...\r\n");
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+    HAL_Delay(1000); // 1s
 
     int curReading  = __HAL_TIM_GetCounter(&htim1);
 
     //HAL_TIM_Base_Stop(&htim1);
 
-    sprintf(buffer, "time elapsed %d\r\n", curReading - prevReading);
+    sprintf(buffer, "time elapsed %d second\r\n", curReading - prevReading);
     HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
 
-    HAL_Delay(1000); // 1s
-
   }
-  /* USER CODE END 3 */
 }
+
 
 /**
   * @brief System Clock Configuration
@@ -205,9 +236,15 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 15999; // 16MHz
+  if (EXE_WAIT)
+    htim1.Init.Prescaler = 15999; // 16MHz
+  else
+    htim1.Init.Prescaler = 15999999999; // 16MHz
+  if (EXE_WAIT)
+    htim1.Init.Period = 999; // 1 s
+  else
+    htim1.Init.Period = 9;  // 1 us
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 999; // 1 us
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
@@ -226,9 +263,27 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM1_Init 2 */
+  if (EXE_WAIT) {
+    HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
 
+    HAL_TIM_Base_Start_IT(&htim1); //Start the timer
+  }
   /* USER CODE END TIM1_Init 2 */
 
+}
+
+void TIM1_UP_TIM10_IRQHandler(void) {
+  HAL_TIM_IRQHandler(&htim1);
+}
+
+int i = 0;
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+  // This callback is automatically called by the HAL on the UEV event
+  if(htim->Instance == TIM1) {
+    sprintf(buffer, "%d\r\n",i++);
+    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+  }
 }
 
 /**
