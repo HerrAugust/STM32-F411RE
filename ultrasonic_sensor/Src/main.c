@@ -73,9 +73,11 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 
-uint32_t pulseIn(void);
-uint8_t getDistance(uint8_t time);
+double pulseIn(void);
+double getDistance(double time);
 void delay_microsec(uint32_t microseconds);
+
+unsigned char buffer[128] = "Begin\r\n";
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -115,10 +117,8 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
     /* USER CODE BEGIN 2 */
-    uint8_t duration = 0;
-    uint8_t distance = 0;
-    unsigned char buffer[64] = "Begin\r\n";
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+    double duration = 0;
+    double distance = 0.0;
     DWT_Init();
     /* USER CODE END 2 */
 
@@ -126,30 +126,29 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
+        sprintf(buffer, "\r\nwhile - Begin\r\n");
+        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+        
         // Trigger Ultrasonic Module: output ultrasound wave for 10 us
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+        DWT_Delay(5); // 15 us
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
-        sprintf(buffer, "going to wait\r\n");
-        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
         DWT_Delay(20); // 15 us
-        sprintf(buffer, "finish\r\n");
-        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
         // Read from Echo pin
-        sprintf(buffer, "pulsing...\r\n");
-        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
         duration = pulseIn();
-        sprintf(buffer, "finish pulsing\r\n");
-        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
         if (duration > 0) {
             distance = getDistance(duration);
-            sprintf(buffer, "Distance: %hhu cm (%hhu us)\r\n", distance, duration);
+            HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+            // %hu works experimentally here for uint8_t.
+            // Also,-u _printf_float should be added to linked options (see Makefile)
+            sprintf(buffer, "while - Distance: %f cm (%f us)\r\n", distance, duration); 
             HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
         }
         else
-            HAL_UART_Transmit(&huart1, "d=0", sizeof("d=0"), HAL_MAX_DELAY);
+            HAL_UART_Transmit(&huart1, "while - d=0\r\n", sizeof("while - d=0\r\n"), HAL_MAX_DELAY);
 
         HAL_Delay(500);
-        return 1;
     }
   /* USER CODE END 3 */
 }
@@ -285,33 +284,31 @@ static void MX_GPIO_Init(void)
  * It returns the length of the pulse in microseconds
  * @return length of the pulse in microseconds
  */
-uint32_t pulseIn(void) {
-    uint32_t prevTick, curTick;
-    unsigned char buffer[64] = "in pulseIn()\r\n";
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+double pulseIn(void) {
+    uint32_t width = 0; // width of HIGH pulse 
 
     while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_RESET)
         ;
-    sprintf(buffer, "now high\r\n");
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
     // Now signal is high. Wait it goes low
-    prevTick = HAL_GetTick();
     while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) ==  GPIO_PIN_SET)
-        ;
-    sprintf(buffer, "now low\r\n");
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+      width++;
     // Now signal is low
-    curTick = HAL_GetTick();
-    return curTick - prevTick;
+    sprintf(buffer, "pulseIn() - %lu\r\n", width);
+    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+
+    // convert the reading to microseconds. System Clock is 16MHz
+    #define clockCyclesToMicroseconds(a) ( a / 16 * 10 ) // why * 10?
+    return clockCyclesToMicroseconds(width ); // microseconds
 }
 
 /**
  * Time to distance
- * @param duration pulse duration
- * @return the distance
+ * @param duration pulse duration in microseconds
+ * @return the distance in cm
  */
-uint8_t getDistance(uint8_t duration) {
-    return duration * 0.034 / 2; // /2 because the signal bounces on the obstacle
+double getDistance(double duration) {
+    double n = duration / 2 * 0.0343; // /2 because the signal bounces on the obstacle
+    return n;
 }
 
 
