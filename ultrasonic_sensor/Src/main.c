@@ -63,6 +63,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart1;
+TIM_HandleTypeDef htim1;
+unsigned char buffer[128] = "Begin\r\n";
 
 /* USER CODE BEGIN PV */
 
@@ -72,12 +74,12 @@ UART_HandleTypeDef huart1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
+static void TIM_Init(void);
 
 double pulseIn(void);
 double getDistance(double time);
 void delay_microsec(uint32_t microseconds);
 
-unsigned char buffer[128] = "Begin\r\n";
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -116,40 +118,41 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
-    /* USER CODE BEGIN 2 */
-    double duration = 0;
-    double distance = 0.0;
-    DWT_Init();
-    /* USER CODE END 2 */
+  MX_TIM1_Init();
+  /* USER CODE BEGIN 2 */
+  double duration = 0;
+  double distance = 0.0;
+  DWT_Init();
+  /* USER CODE END 2 */
 
-    /* Infinite loop */
-    /* USER CODE BEGIN WHILE */
-    while (1)
-    {
-        sprintf(buffer, "\r\nwhile - Begin\r\n");
-        HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-        
-        // Trigger Ultrasonic Module: output ultrasound wave for 10 us
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
-        DWT_Delay(5); // 15 us
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
-        DWT_Delay(20); // 15 us
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
-        // Read from Echo pin
-        duration = pulseIn();
-        if (duration > 0) {
-            distance = getDistance(duration);
-            HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-            // %hu works experimentally here for uint8_t.
-            // Also,-u _printf_float should be added to linked options (see Makefile)
-            sprintf(buffer, "while - Distance: %f cm (%f us)\r\n", distance, duration); 
-            HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-        }
-        else
-            HAL_UART_Transmit(&huart1, "while - d=0\r\n", sizeof("while - d=0\r\n"), HAL_MAX_DELAY);
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+      sprintf(buffer, "\r\nwhile - Begin\r\n");
+      HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+      
+      // Trigger Ultrasonic Module: output ultrasound wave for 10 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+      DWT_Delay(5); // 15 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
+      DWT_Delay(20); // 15 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+      // Read from Echo pin
+      duration = pulseIn();
+      if (duration > 0) {
+          distance = getDistance(duration);
+          HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+          // %hu works experimentally here for uint8_t.
+          // Also,-u _printf_float should be added to linked options (see Makefile)
+          sprintf(buffer, "while - Distance: %f cm (%f us)\r\n", distance, duration); 
+          HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+      }
+      else
+          HAL_UART_Transmit(&huart1, "while - d=0\r\n", sizeof("while - d=0\r\n"), HAL_MAX_DELAY);
 
-        HAL_Delay(500);
-    }
+      HAL_Delay(500);
+  }
   /* USER CODE END 3 */
 }
 
@@ -189,6 +192,51 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 15999; // 16MHz
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 999; // 1 us
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+
 }
 
 /**
