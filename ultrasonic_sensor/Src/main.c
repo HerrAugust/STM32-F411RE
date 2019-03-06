@@ -74,7 +74,7 @@ unsigned char buffer[128] = "Begin\r\n";
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
-static void TIM_Init(void);
+static void MX_TIM1_Init(void);
 
 double pulseIn(void);
 double getDistance(double time);
