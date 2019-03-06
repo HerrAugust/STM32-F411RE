@@ -129,7 +129,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      sprintf(buffer, "\r\nwhile - Begin\r\n");
+      sprintf(buffer, "\r\nwhile - Begin                                                             \r\n");
       HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
       
       // Trigger Ultrasonic Module: output ultrasound wave for 10 us
@@ -142,14 +142,13 @@ int main(void)
       duration = pulseIn();
       if (duration > 0) {
           distance = getDistance(duration);
-          HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
           // %hu works experimentally here for uint8_t.
           // Also,-u _printf_float should be added to linked options (see Makefile)
           sprintf(buffer, "while - Distance: %f cm (%f us)\r\n", distance, duration); 
           HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
       }
       else
-          HAL_UART_Transmit(&huart1, "while - d=0\r\n", sizeof("while - d=0\r\n"), HAL_MAX_DELAY);
+          HAL_UART_Transmit(&huart1, "while - duration=0\r\n", sizeof("while - duration=0\r\n"), HAL_MAX_DELAY);
 
       HAL_Delay(500);
   }
@@ -213,9 +212,14 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 15999; // 16MHz
+  htim1.Init.Prescaler = 16; // 16MHz ---> 1MHz
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 999; // 1 us
+  htim1.Init.Period = 0xFFFF; // 1 us. 0xFFFF = 65535 = 2^16-1
+  /* This conceptually means: overflow at 2^16, i.e. "TIM1, just keep counting!".
+   * Since then the final speed of TIM is 1MHz, it'll increase by 1 every 1/1.000.000=1us
+   * and you'll read with precision ~1us.
+   * The formula for Update Event doesn't count much here
+   */
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
@@ -233,6 +237,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  HAL_TIM_Base_Start(&htim1); // NOTICE: CubeMX doesn't write this instruction, thus timer won't start :(
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
@@ -325,7 +330,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+int i = 0;
 /**
  * Waits that the signal of echo goes to high, starts a timer
  * and waits the echo signal to go back high.
@@ -333,20 +338,18 @@ static void MX_GPIO_Init(void)
  * @return length of the pulse in microseconds
  */
 double pulseIn(void) {
-    uint32_t width = 0; // width of HIGH pulse 
-
     while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_RESET)
         ;
     // Now signal is high. Wait it goes low
+    uint16_t a = __HAL_TIM_GetCounter(&htim1);
     while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) ==  GPIO_PIN_SET)
-      width++;
+      ;
+    uint16_t b = __HAL_TIM_GetCounter(&htim1);
     // Now signal is low
-    sprintf(buffer, "pulseIn() - %lu\r\n", width);
+    sprintf(buffer, "%d pulseIn() - %d-%d=%luus                                            \r\n", i,b,a, b-a);
     HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
 
-    // convert the reading to microseconds. System Clock is 16MHz
-    #define clockCyclesToMicroseconds(a) ( a / 16 * 10 ) // why * 10?
-    return clockCyclesToMicroseconds(width ); // microseconds
+    return b-a;
 }
 
 /**
