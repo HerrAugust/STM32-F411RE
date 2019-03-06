@@ -62,10 +62,11 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim3;
-
 UART_HandleTypeDef huart1;
-
+TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim3;
+unsigned char buffer[128] = "Begin\r\n";  // for debug
+int i = 0;                                // for debug
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -74,7 +75,13 @@ UART_HandleTypeDef huart1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
+
+double pulseIn(void);
+double getDistance(double time);
+void delay_microsec(uint32_t microseconds);
+void updateBuzzer(double distance);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -113,41 +120,60 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_TIM1_Init();
   MX_TIM3_Init();
+
   /* USER CODE BEGIN 2 */
-  unsigned char buffer[20] = "Begin\r\n";
-  HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-
+  double duration = 0;
+  double distance = 0.0;
+  
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-
-  uint16_t dutyCycle = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
-  sprintf(buffer, "qui");
-  HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+  DWT_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  sprintf(buffer, "qui %u\r\n", __HAL_TIM_GET_AUTORELOAD(&htim3));
-  HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
   while (1)
   {
-    /* USER CODE END WHILE */
-    sprintf(buffer, "Incrementing\r\n");
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-    while(dutyCycle < __HAL_TIM_GET_AUTORELOAD(&htim3)) {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, ++dutyCycle);
-        HAL_Delay(1);
-    }
+      sprintf(buffer, "\r\nwhile - Begin                                                             \r\n");
+      HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+      
+      // Trigger Ultrasonic Module: output ultrasound wave for 10 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+      DWT_Delay(5); // 5 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
+      DWT_Delay(20); // 20 us
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+      // Read from Echo pin
+      duration = pulseIn();
+      if (duration > 0) {
+          distance = getDistance(duration);
+          // Also,-u _printf_float should be added to linked options (see Makefile)
+          sprintf(buffer, "while - Distance: %f cm (%f us)\r\n", distance, duration); 
+          HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+          updateBuzzer(distance);
+      }
+      else
+          HAL_UART_Transmit(&huart1, "while - duration=0\r\n", sizeof("while - duration=0\r\n"), HAL_MAX_DELAY);
 
-    sprintf(buffer, "Decrementing\r\n");
-    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
-    while(dutyCycle > 0) {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, --dutyCycle);
-        HAL_Delay(1);
-    }
-    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+
+/**
+  * Activates the buzzer with different voltages
+  */
+void updateBuzzer(double distance) {
+  // dist = 4cm => 3,3V. 4 : 5 = dist : x => x (volt) = 3,3/4*dist
+  // 3,3v * duty_cycle = x volt (x is the output voltage I want) =>
+  // d_c = x/3,3 = 3,3/4*dist/3,3 = dist/4
+
+  double dutyCycle = distance / 4;
+  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, dutyCycle);
+    
+  sprintf(buffer, "Distance %f/4 = Duty cycle %lu                                         \r\n", distance, dutyCycle); 
+  HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
 }
 
 /**
@@ -189,6 +215,57 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 16; // 16MHz ---> 1MHz
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 0xFFFF; // 1 us. 0xFFFF = 65535 = 2^16-1
+  /* This conceptually means: overflow at 2^16, i.e. "TIM1, just keep counting!".
+   * Since then the final speed of TIM is 1MHz, it'll increase by 1 every 1/1.000.000=1us
+   * and you'll read with precision ~1us.
+   * The formula for Update Event doesn't count much here
+   */
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  HAL_TIM_Base_Start(&htim1); // NOTICE: CubeMX doesn't write this instruction, thus timer won't start :(
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -200,17 +277,28 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
   /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3; // 16MHz
-  htim3.Init.Prescaler = 15999;
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 499;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 99; // 10 seconds
+  // Period = 10 because, experimentally, this way I get a fluid sound, instead of a stuttering one (Period = 999)
+  htim3.Init.Period = 10; //if Period = 999 && V_max = 3.3V => we can regulate the output voltage with steps of ~0,0033V
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
@@ -284,10 +372,26 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PA6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PC7 */
   GPIO_InitStruct.Pin = GPIO_PIN_7;
@@ -296,22 +400,48 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  /*Configure GPIO pin : PB6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+ * Waits that the signal of echo goes to high, starts a timer
+ * and waits the echo signal to go back high.
+ * It returns the length of the pulse in microseconds
+ * @return length of the pulse in microseconds
+ */
+double pulseIn(void) {
+    while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_RESET)
+        ;
+    // Now signal is high. Wait it goes low
+    uint16_t a = __HAL_TIM_GetCounter(&htim1);
+    while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) ==  GPIO_PIN_SET)
+      ;
+    uint16_t b = __HAL_TIM_GetCounter(&htim1);
+    // Now signal is low
+    sprintf(buffer, "%d pulseIn() - %d-%d=%uus                                            \r\n", i++,b,a, b-a);
+    HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+
+    return b-a;
+}
+
+/**
+ * Time to distance
+ * @param duration pulse duration in microseconds
+ * @return the distance in cm
+ */
+double getDistance(double duration) {
+    double n = duration / 2 * 0.0343; // /2 because the signal bounces on the obstacle
+    return n;
+}
+
 
 /* USER CODE END 4 */
 
